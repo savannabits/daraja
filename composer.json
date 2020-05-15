@@ -1,6 +1,6 @@
 {
     "name": "savannabits/daraja",
-    "description": "Laravel Package for Safaricom's Mpesa API Dubbed DARAJA",
+    "description": "Laravel Package to simplify the tasks of integrating with Safaricom's Mpesa API Dubbed DARAJA",
     "keywords": [
         "savannabits",
         "daraja"
