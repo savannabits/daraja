@@ -1,0 +1,54 @@
+{
+    "name": "savannabits/daraja",
+    "description": "Laravel Package for Safaricom's Mpesa API Dubbed DARAJA",
+    "keywords": [
+        "savannabits",
+        "daraja"
+    ],
+    "homepage": "https://github.com/savannabits/daraja",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Sam Maosa",
+            "email": "maosa.sam@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^7.2",
+        "illuminate/support": "^6.0|^7.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^4.0",
+        "phpunit/phpunit": "^8.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Savannabits\\Daraja\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Savannabits\\Daraja\\Tests\\": "tests"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit",
+        "test-coverage": "vendor/bin/phpunit --coverage-html coverage"
+
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Savannabits\\Daraja\\DarajaServiceProvider"
+            ],
+            "aliases": {
+                "Daraja": "Savannabits\\Daraja\\DarajaFacade"
+            }
+        }
+    }
+}
