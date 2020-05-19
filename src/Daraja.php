@@ -2,7 +2,7 @@
 
 namespace Savannabits\Daraja;
 
-use Symfony\Component\Dotenv\Dotenv;;
+use Symfony\Component\Dotenv\Dotenv;
 
 class Daraja
 {
@@ -72,7 +72,10 @@ class Daraja
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         $curl_response = curl_exec($curl);
-        $this->access_token = json_decode($curl_response)->access_token;
+        $this->access_token = optional(json_decode($curl_response))->access_token;
+        if (!$this->access_token) {
+            abort(500, "Access token could not be generated.");
+        }
         return $this;
     }
 
@@ -102,7 +105,10 @@ class Daraja
 
         $curl_response = curl_exec($curl);
 
-        $this->access_token = json_decode($curl_response)->access_token;
+        $this->access_token = optional(json_decode($curl_response))->access_token;
+        if (!$this->access_token) {
+            abort(500, "Access token could not be generated.");
+        }
         return $this;
     }
 
