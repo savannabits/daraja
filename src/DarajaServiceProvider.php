@@ -24,6 +24,11 @@ class DarajaServiceProvider extends ServiceProvider
                 __DIR__.'/../config/config.php' => config_path('daraja.php'),
             ], 'config');
 
+            // Publishing mpesa certs.
+            $this->publishes([
+                __DIR__.'/../certs' => storage_path('mpesa'),
+            ], 'certs');
+
             // Publishing the views.
             /*$this->publishes([
                 __DIR__.'/../resources/views' => resource_path('views/vendor/daraja'),

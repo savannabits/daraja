@@ -156,7 +156,40 @@ class Daraja
     }
 
     /**
-     * Use this function to initiate a reversal request
+     * Generate an encrypted security credential from the initiator password on either live or sandbox env.
+     * @param string $initiatorPassword
+     * @param string $env live|sandbox
+     */
+    public function encryptInitiatorPassword($initiatorPassword, $env="sandbox") {
+        if (!in_array($env,["live", "sandbox"])) {
+            throw new \Exception("Environment must be either live or sandbox");
+        }
+        $publicKey = config('daraja.mpesa.cert_path')."/".config('daraja.mpesa.'.$env.'_cert_name');
+        openssl_public_encrypt($initiatorPassword, $encrypted, $publicKey, OPENSSL_PKCS1_PADDING);
+        return base64_encode($encrypted);
+    }
+
+    /**
+     * Use this function to initiate a reversal request. This is an abstracted function that takes care of SecurityCredential Generation
+     * @param $Initiator | The name of Initiator to initiating  the request
+     * @param $InitiatorPassword | 	Plain Text Initiator Password for generating the security credential
+     * @param $TransactionID | Unique Id received with every transaction response.
+     * @param $Amount | Amount
+     * @param $ReceiverParty | Organization /MSISDN sending the transaction
+     * @param $ResultURL | The path that stores information of transaction
+     * @param $QueueTimeOutURL | The path that stores information of time out transaction
+     * @param $Remarks | Comments that are sent along with the transaction.
+     * @param $Occasion | 	Optional Parameter
+     * @return mixed|string
+     */
+    public function reverseTransaction($Initiator, $InitiatorPassword, $TransactionID, $Amount, $ReceiverParty, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion) {
+        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
+        $CommandID = 'TransactionReversal';
+        $RecieverIdentifierType = 11;
+        return $this->reversal($CommandID,$Initiator,$SecurityCredential,$TransactionID,$Amount,$ReceiverParty,$RecieverIdentifierType,$ResultURL,$QueueTimeOutURL,$Remarks,$Occasion);
+    }
+    /**
+     * Use this function to initiate a reversal request. This is the lowest level function that can change even the Organization Id Type.
      * @param $CommandID | Takes only 'TransactionReversal' Command id
      * @param $Initiator | The name of Initiator to initiating  the request
      * @param $SecurityCredential | 	Encrypted Credential of user getting transaction amount
@@ -211,7 +244,6 @@ class Daraja
         curl_setopt($curl, CURLOPT_HEADER, false);
         $curl_response = curl_exec($curl);
         return json_decode($curl_response);
-
     }
 
     /**
