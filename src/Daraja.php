@@ -164,9 +164,18 @@ class Daraja
         if (!in_array($env,["live", "sandbox"])) {
             throw new \Exception("Environment must be either live or sandbox");
         }
-        $publicKey = config('daraja.mpesa.cert_path')."/".config('daraja.mpesa.'.$env.'_cert_name');
-        openssl_public_encrypt($initiatorPassword, $encrypted, $publicKey, OPENSSL_PKCS1_PADDING);
+        $publicKeyFile = config('daraja.mpesa.cert_path')."/".config('daraja.mpesa.'.$env.'_cert_name');
+        $publicKey = $this->preparePublicKey($publicKeyFile);
+        openssl_public_encrypt($initiatorPassword, $encrypted,$publicKey, OPENSSL_PKCS1_PADDING);
         return base64_encode($encrypted);
+    }
+
+    public function preparePublicKey($publicKeyFile) {
+        $pkey = file_get_contents(storage_path("mpesa/sandbox.cer"));
+        $pkey = str_replace(["\r", "\n"],"", $pkey);
+        $pkey = str_replace(["-----BEGIN CERTIFICATE-----"],"-----BEGIN CERTIFICATE-----\n", $pkey);
+        $final = str_replace(["-----END CERTIFICATE-----"],"\n-----END CERTIFICATE-----", $pkey);
+        return $final;
     }
 
     /**
