@@ -180,22 +180,42 @@ class Daraja
 
     /**
      * Use this function to initiate a reversal request. This is an abstracted function that takes care of SecurityCredential Generation
-     * @param $Initiator | The name of Initiator to initiating  the request
-     * @param $InitiatorPassword | 	Plain Text Initiator Password for generating the security credential
+     * @param $Initiator | The name of Initiator - Username of user initiating the transaction
+     * @param $InitiatorPassword |    Plain Text Initiator Password for generating the security credential
      * @param $TransactionID | Unique Id received with every transaction response.
      * @param $Amount | Amount
      * @param $ReceiverParty | Organization /MSISDN sending the transaction
      * @param $ResultURL | The path that stores information of transaction
      * @param $QueueTimeOutURL | The path that stores information of time out transaction
      * @param $Remarks | Comments that are sent along with the transaction.
-     * @param $Occasion | 	Optional Parameter
+     * @param $Occasion |    Optional Parameter
      * @return mixed|string
+     * @throws \Exception
      */
-    public function reverseTransaction($Initiator, $InitiatorPassword, $TransactionID, $Amount, $ReceiverParty, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion) {
+    public function reverseTransaction($Initiator, $InitiatorPassword, $TransactionID, $Amount, $ReceiverParty, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $ReceiverIdentifierType=11) {
         $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
         $CommandID = 'TransactionReversal';
-        $RecieverIdentifierType = 11;
-        return $this->reversal($CommandID,$Initiator,$SecurityCredential,$TransactionID,$Amount,$ReceiverParty,$RecieverIdentifierType,$ResultURL,$QueueTimeOutURL,$Remarks,$Occasion);
+        return $this->reversal($CommandID,$Initiator,$SecurityCredential,$TransactionID,$Amount,$ReceiverParty,$ReceiverIdentifierType,$ResultURL,$QueueTimeOutURL,$Remarks,$Occasion);
+    }
+
+    /**
+     * Use this function to initiate a transaciton status query
+     * @param $Initiator | The username of the user initiating the transaction. This is the credential/username used to authenticate the transaction request
+     * @param $InitiatorPassword | PlainText Initiator password
+     * @param $TransactionID | Mpesa confirmation code of the trasaction whose query we are checking
+     * @param $PartyA | The shortcode or msisdn of the organization that is receiving the transaction
+     * @param $ResultURL | Where will the result be sent to
+     * @param $QueueTimeOutURL | In case of a timeout, this url will be called.
+     * @param $Remarks |Comments sent along with the transaction
+     * @param $Occasion | Optional Parameter.
+     * @param int $IdentifierType | The type of organization receiving the transaction: 1 = MSISDN, 2 = TILL, 4 = Org shortcode
+     * @return mixed|string
+     * @throws \Exception
+     */
+    public function checkTransactionStatus($Initiator, $InitiatorPassword, $TransactionID, $PartyA, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $IdentifierType=4) {
+        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
+        $CommandID = 'TransactionStatusQuery';
+        return $this->transactionStatus($Initiator, $SecurityCredential, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion);
     }
     /**
      * Use this function to initiate a reversal request. This is the lowest level function that can change even the Organization Id Type.
@@ -212,7 +232,7 @@ class Daraja
      * @param $Occasion | 	Optional Parameter
      * @return mixed|string
      */
-    public function reversal($CommandID, $Initiator, $SecurityCredential, $TransactionID, $Amount, $ReceiverParty, $RecieverIdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion){
+    private function reversal($CommandID, $Initiator, $SecurityCredential, $TransactionID, $Amount, $ReceiverParty, $RecieverIdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion){
 
         $environment = $this->environment;
         if( $environment =="live"){
@@ -423,7 +443,7 @@ class Daraja
      * @param $Occasion | 	Optional Parameter
      * @return mixed|string
      */
-    public function transactionStatus($Initiator, $SecurityCredential, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion){
+    private function transactionStatus($Initiator, $SecurityCredential, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion){
 
         $environment = $this->environment;
 
