@@ -171,7 +171,7 @@ class Daraja
     }
 
     public function preparePublicKey($publicKeyFile) {
-        $pkey = file_get_contents(storage_path("mpesa/sandbox.cer"));
+        $pkey = file_get_contents($publicKeyFile);
         $pkey = str_replace(["\r", "\n"],"", $pkey);
         $pkey = str_replace(["-----BEGIN CERTIFICATE-----"],"-----BEGIN CERTIFICATE-----\n", $pkey);
         $final = str_replace(["-----END CERTIFICATE-----"],"\n-----END CERTIFICATE-----", $pkey);
@@ -181,7 +181,7 @@ class Daraja
     /**
      * Use this function to initiate a reversal request. This is an abstracted function that takes care of SecurityCredential Generation
      * @param $Initiator | The name of Initiator - Username of user initiating the transaction
-     * @param $InitiatorPassword |    Plain Text Initiator Password for generating the security credential
+     * @param $InitiatorPassword |    Encrypted Initiator Password / security credential
      * @param $TransactionID | Unique Id received with every transaction response.
      * @param $Amount | Amount
      * @param $ReceiverParty | Organization /MSISDN sending the transaction
@@ -193,15 +193,15 @@ class Daraja
      * @throws \Exception
      */
     public function reverseTransaction($Initiator, $InitiatorPassword, $TransactionID, $Amount, $ReceiverParty, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $ReceiverIdentifierType=11) {
-        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
+//        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
         $CommandID = 'TransactionReversal';
-        return $this->reversal($CommandID,$Initiator,$SecurityCredential,$TransactionID,$Amount,$ReceiverParty,$ReceiverIdentifierType,$ResultURL,$QueueTimeOutURL,$Remarks,$Occasion);
+        return $this->reversal($CommandID,$Initiator,$InitiatorPassword,$TransactionID,$Amount,$ReceiverParty,$ReceiverIdentifierType,$ResultURL,$QueueTimeOutURL,$Remarks,$Occasion);
     }
 
     /**
      * Use this function to initiate a transaciton status query
      * @param $Initiator | The username of the user initiating the transaction. This is the credential/username used to authenticate the transaction request
-     * @param $InitiatorPassword | PlainText Initiator password
+     * @param $InitiatorPassword | Encrypted Security Credential. see daraja docs on how to encrypt
      * @param $TransactionID | Mpesa confirmation code of the trasaction whose query we are checking
      * @param $PartyA | The shortcode or msisdn of the organization that is receiving the transaction
      * @param $ResultURL | Where will the result be sent to
@@ -213,9 +213,9 @@ class Daraja
      * @throws \Exception
      */
     public function checkTransactionStatus($Initiator, $InitiatorPassword, $TransactionID, $PartyA, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $IdentifierType=4) {
-        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
+//        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
         $CommandID = 'TransactionStatusQuery';
-        return $this->transactionStatus($Initiator, $SecurityCredential, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion);
+        return $this->transactionStatus($Initiator, $InitiatorPassword, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion);
     }
     /**
      * Use this function to initiate a reversal request. This is the lowest level function that can change even the Organization Id Type.
