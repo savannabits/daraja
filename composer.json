@@ -1,7 +1,21 @@
 {
     "name": "savannabits/daraja",
-    "description": "Laravel Package to simplify the tasks of integrating with Safaricom's Mpesa API Dubbed DARAJA",
+    "description": "Safaricom Mpesa API (Safaricom Daraja) for PHP Laravel . Simple integration with safaricom's MPESA API dubbed { DARAJA } and allow you to make requests in the nice ",
     "keywords": [
+        "safaricom",
+        "daraja mpesa",
+        "safaricom mpesa",
+        "laravel mpesa",
+        "laravel safaricom",
+        "laravel daraja",
+        "daraja api",
+        "safaricom api",
+        "laravel mpesa api",
+        "php mpesa",
+        "php daraja",
+        "safaricom php mpesa",
+        "mpesa",
+        "daraja",
         "savannabits",
         "daraja"
     ],
