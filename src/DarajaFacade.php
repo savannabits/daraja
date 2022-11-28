@@ -4,9 +4,6 @@ namespace Savannabits\Daraja;
 
 use Illuminate\Support\Facades\Facade;
 
-/**
- * @see \Savannabits\Daraja\Skeleton\SkeletonClass
- */
 class DarajaFacade extends Facade
 {
     /**
@@ -16,6 +13,6 @@ class DarajaFacade extends Facade
      */
     protected static function getFacadeAccessor()
     {
-        return 'daraja';
+        return Daraja::class;
     }
 }

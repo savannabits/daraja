@@ -2,187 +2,135 @@
 
 namespace Savannabits\Daraja;
 
-use Symfony\Component\Dotenv\Dotenv;
+use Exception;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use JetBrains\PhpStorm\ArrayShape;
 
 class Daraja
 {
+    private string $consumer_key, $consumer_secret, $access_token, $environment = 'sandbox';
 
-    private  $consumer_key, $consumer_secret, $access_token, $environment;
-    /**
-     * Define env method similar to laravel's
-     *
-     * @param String $env_param | Environment Param Name
-     *
-     * @return array|false|string
-     */
-    public static function env($env_param){
+    const CANCELLED = 'Cancelled';
 
-        $dotenv = new Dotenv();
+    const SAND_BASE_URL = 'https://sandbox.safaricom.co.ke';
+    const LIVE_BASE_URL = 'https://api.safaricom.co.ke';
 
-        $dotenv->load('../.env');
+    const TOKEN_URL = '/oauth/v1/generate';
+    const C2B_V2_REGISTER_URL = '/mpesa/c2b/v2/registerurl';
+    const C2B_V1_REGISTER_URL = '/mpesa/c2b/v1/registerurl';
+    const C2B_V1_SIMULATE_URL = '/mpesa/c2b/v1/simulate';
+    const C2B_V2_SIMULATE_URL = '/mpesa/c2b/v2/simulate';
+    const LNM_PROCESS_URL = '/mpesa/stkpush/v1/processrequest';
+    const LNM_QUERY_URL = '/mpesa/stkpushquery/v1/query';
 
-        $env = getenv($env_param);
+    const ERROR_INVALID_MSISDN          = 'C2B00011';
+    const ERROR_INVALID_ACCOUNT_NUMBER  = 'C2B00012';
+    const ERROR_INVALID_AMOUNT          = 'C2B00013';
+    const ERROR_INVALID_KYC_DETAILS     = 'C2B00014';
+    const ERROR_OTHER                   = 'C2B00016';
 
-        return $env;
+    public static function getInstance(): Daraja
+    {
+        return new self();
+    }
+    protected function getUrl($endpoint): string
+    {
+        $base = $this->isLive() ? self::LIVE_BASE_URL : self::SAND_BASE_URL;
+        return "$base{$endpoint}";
     }
 
-    /**
-     * This is used to return an instance of the class especially when it is being used statically.
-     * @return Daraja
-     */
-    public static function getInstance() {
-        return new self;
+    protected function isSandbox(): bool
+    {
+        return !$this->isLive();
+    }
+
+    protected function isLive(): bool
+    {
+        return $this->environment === 'live';
     }
 
     /**
      * Generate instance's member credentials during runtime which will be used to generate tokens and make other calls
-     * @param $mpesa_consumer_key
-     * @param $mpesa_consumer_secret
+     * @param string $consumer_key
+     * @param string $consumer_secret
+     * @param bool|null $live
+     * @return Daraja
+     * @throws RequestException
+     */
+    public function setCredentials(string $consumer_key, string $consumer_secret, ?bool $live = false): static
+    {
+        abort_unless($consumer_key && $consumer_secret, 500, "You must pass both the consumer key and consumer secret");
+        $this->consumer_key = $consumer_key;
+        $this->consumer_secret = $consumer_secret;
+        $this->environment = $live ? 'live' : 'sandbox';
+        return $this->generateToken();
+    }
+
+    /**
+     * This is used to generate tokens for the live or sandbox environment
      * @return Daraja
      */
-    public function setCredentials($mpesa_consumer_key, $mpesa_consumer_secret, $mpesa_env='sandbox') {
-        if (!strlen($mpesa_consumer_key)|| !strlen($mpesa_consumer_secret)){
-            die("Please provide a valid consumer key and secret as provided by safaricom");
-        }
-        if ($mpesa_env!=='sandbox' && $mpesa_env !=='live') {
-            die('mpesa_env MUST be either sandbox or live');
-        }
-        $this->consumer_key = $mpesa_consumer_key;
-        $this->consumer_secret = $mpesa_consumer_secret;
-        $this->environment = $mpesa_env;
-        return $this;
-    }
-
-    /**
-     * This is used to generate tokens for the live environment
-     * @return mixed
-     */
-    public function generateLiveToken(){
-        if(!isset($this->consumer_key)||!isset($this->consumer_secret)){
-            die("please set the consumer key and consumer secret as defined in the documentation. You can use setCredentials() before calling this function.");
-        }
+    private function generateToken(): static
+    {
         $consumer_key = $this->consumer_key;
         $consumer_secret = $this->consumer_secret;
-        $url = 'https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        $credentials = base64_encode($consumer_key.':'.$consumer_secret);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Authorization: Basic '.$credentials)); //setting a custom header
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        $curl_response = curl_exec($curl);
-        $this->access_token = optional(json_decode($curl_response))->access_token;
-        if (!$this->access_token) {
-            abort(500, "Access token could not be generated.");
+        $url = $this->getUrl(self::TOKEN_URL);
+        try {
+            $response = Http::withBasicAuth($consumer_key, $consumer_secret)
+                ->get($url, ['grant_type' => 'client_credentials'])
+                ->throw()->collect();
+        } catch (RequestException $e) {
+            Log::info($e);
+            abort($e->response?->status() ?? 400, $e->response->reason());
         }
+        /*
+         * Response Structure
+         *   {
+         *       "access_token": "orjGJVfE3WTivTpPaDEBAGdMaPTM",
+         *       "expires_in": "3599"
+         *   }
+        */
+        $this->access_token = $response->get('access_token');
+        abort_unless($this->access_token, 500, "Access token could not be generated");
         return $this;
     }
 
-    public function getAccessToken() {
+    public function getAccessToken(): string
+    {
         return $this->access_token;
-    }
-    /**
-     * use this function to generate a sandbox token
-     * @return mixed
-     */
-    public function generateSandBoxToken(){
-
-        if(!isset($this->consumer_key)||!isset($this->consumer_secret)){
-            die("please set the consumer key and consumer secret as defined in the documentation. You can use setCredentials() before calling this function.");
-        }
-        $consumer_key = $this->consumer_key;
-        $consumer_secret = $this->consumer_secret;
-        $url = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        $credentials = base64_encode($consumer_key.':'.$consumer_secret);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Authorization: Basic '.$credentials)); //setting a custom header
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-
-        $curl_response = curl_exec($curl);
-
-        $this->access_token = optional(json_decode($curl_response))->access_token;
-        if (!$this->access_token) {
-            abort(500, "Access token could not be generated.");
-        }
-        return $this;
     }
 
     /**
      * Register Validation and Confirmation Callbacks
-     * @param $shortCode | The MPESA Short Code
+     * @param string $shortCode | The MPESA Short Code
      * @param string $confirmationURL | Confirmation Callback URL
      * @param string|null $validationURL | Validation Callback URL
-     * @param string $responseType | Default Response type in case the validation URL is unreachable or is undefined. Either Cancelled or Completed as per the safaricom documentation
-     * @return false|mixed|string
+     * @param string|null $responseType | Default Response type in case the validation URL is unreachable or is undefined. Either Cancelled or Completed as per the safaricom documentation
+     * @param string|null $darajaVersion
+     * @return Collection
+     * @throws RequestException
      */
-    public function registerCallbacks($shortCode,$confirmationURL, $validationURL=null, $responseType="Cancelled") {
-        $environment = $this->environment;
-        if( $environment =="live"){
-            $url = "https://api.safaricom.co.ke/mpesa/c2b/v1/registerurl";
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = "https://sandbox.safaricom.co.ke/mpesa/c2b/v1/registerurl";
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"Invalid App environment. Please set it via setCredentials() to either live or sandbox."]);
-        }
-
+    public function registerCallbacks(string $shortCode, string $confirmationURL, ?string $validationURL = null, ?string $responseType = self::CANCELLED, ?string $darajaVersion='v2'): Collection
+    {
+        $url = strtolower($darajaVersion) ==='v1' ? $this->getUrl(self::C2B_V1_REGISTER_URL) : $this->getUrl(self::C2B_V2_REGISTER_URL);
         $token = $this->getAccessToken();
-        $curl = curl_init();
-
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token));
-
-
-        $curl_post_data = array(
+        $payload = array(
             "ValidationURL" => $validationURL,
             "ConfirmationURL" => $confirmationURL,
             "ResponseType" => $responseType,
             "ShortCode" => $shortCode
         );
-
-        $data_string = json_encode($curl_post_data);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_POST, true);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        $curl_response = curl_exec($curl);
-        return json_decode($curl_response);
-    }
-
-    /**
-     * Generate an encrypted security credential from the initiator password on either live or sandbox env.
-     * @param string $initiatorPassword
-     * @param string $env live|sandbox
-     */
-    public function encryptInitiatorPassword($initiatorPassword, $env="sandbox") {
-        if (!in_array($env,["live", "sandbox"])) {
-            throw new \Exception("Environment must be either live or sandbox");
-        }
-        $publicKeyFile = config('daraja.mpesa.cert_path')."/".config('daraja.mpesa.'.$env.'_cert_name');
-        $publicKey = $this->preparePublicKey($publicKeyFile);
-        openssl_public_encrypt($initiatorPassword, $encrypted,$publicKey, OPENSSL_PKCS1_PADDING);
-        return base64_encode($encrypted);
-    }
-
-    public function preparePublicKey($publicKeyFile) {
-        $pkey = file_get_contents($publicKeyFile);
-        $pkey = str_replace(["\r", "\n"],"", $pkey);
-        $pkey = str_replace(["-----BEGIN CERTIFICATE-----"],"-----BEGIN CERTIFICATE-----\n", $pkey);
-        $final = str_replace(["-----END CERTIFICATE-----"],"\n-----END CERTIFICATE-----", $pkey);
-        return $final;
+        return Http::withToken($token)->withoutVerifying()->acceptJson()->post($url, $payload)->throw()->collect();
     }
 
     /**
      * Use this function to initiate a reversal request. This is an abstracted function that takes care of SecurityCredential Generation
      * @param $Initiator | The name of Initiator - Username of user initiating the transaction
      * @param $InitiatorPassword |    Encrypted Initiator Password / security credential
-     * @param $TransactionID | Unique Id received with every transaction response.
+     * @param $TransactionID | Unique ID received with every transaction response.
      * @param $Amount | Amount
      * @param $ReceiverParty | Organization /MSISDN sending the transaction
      * @param $ResultURL | The path that stores information of transaction
@@ -190,12 +138,24 @@ class Daraja
      * @param $Remarks | Comments that are sent along with the transaction.
      * @param $Occasion |    Optional Parameter
      * @return mixed|string
-     * @throws \Exception
+     * @throws Exception
      */
-    public function reverseTransaction($Initiator, $InitiatorPassword, $TransactionID, $Amount, $ReceiverParty, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $ReceiverIdentifierType=11) {
+    public function reverseTransaction(
+        $Initiator,
+        $InitiatorPassword,
+        $TransactionID,
+        $Amount,
+        $ReceiverParty,
+        $ResultURL,
+        $QueueTimeOutURL,
+        $Remarks,
+        $Occasion,
+        $ReceiverIdentifierType = 11
+    )
+    {
 //        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
         $CommandID = 'TransactionReversal';
-        return $this->reversal($CommandID,$Initiator,$InitiatorPassword,$TransactionID,$Amount,$ReceiverParty,$ReceiverIdentifierType,$ResultURL,$QueueTimeOutURL,$Remarks,$Occasion);
+        return $this->reversal($CommandID, $Initiator, $InitiatorPassword, $TransactionID, $Amount, $ReceiverParty, $ReceiverIdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion);
     }
 
     /**
@@ -210,47 +170,40 @@ class Daraja
      * @param $Occasion | Optional Parameter.
      * @param int $IdentifierType | The type of organization receiving the transaction: 1 = MSISDN, 2 = TILL, 4 = Org shortcode
      * @return mixed|string
-     * @throws \Exception
+     * @throws Exception
      */
-    public function checkTransactionStatus($Initiator, $InitiatorPassword, $TransactionID, $PartyA, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $IdentifierType=4) {
+    public function checkTransactionStatus($Initiator, $InitiatorPassword, $TransactionID, $PartyA, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion, $IdentifierType = 4)
+    {
 //        $SecurityCredential = $this->encryptInitiatorPassword($InitiatorPassword,$this->environment);
         $CommandID = 'TransactionStatusQuery';
         return $this->transactionStatus($Initiator, $InitiatorPassword, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion);
     }
+
     /**
      * Use this function to initiate a reversal request. This is the lowest level function that can change even the Organization Id Type.
      * @param $CommandID | Takes only 'TransactionReversal' Command id
      * @param $Initiator | The name of Initiator to initiating  the request
-     * @param $SecurityCredential | 	Encrypted Credential of user getting transaction amount
-     * @param $TransactionID | Unique Id received with every transaction response.
+     * @param $SecurityCredential |    Encrypted Credential of user getting transaction amount
+     * @param $TransactionID | Unique ID received with every transaction response.
      * @param $Amount | Amount
      * @param $ReceiverParty | Organization /MSISDN sending the transaction
      * @param $RecieverIdentifierType | Type of organization receiving the transaction
      * @param $ResultURL | The path that stores information of transaction
      * @param $QueueTimeOutURL | The path that stores information of time out transaction
      * @param $Remarks | Comments that are sent along with the transaction.
-     * @param $Occasion | 	Optional Parameter
+     * @param $Occasion |    Optional Parameter
      * @return mixed|string
+     * @throws RequestException
      */
-    private function reversal($CommandID, $Initiator, $SecurityCredential, $TransactionID, $Amount, $ReceiverParty, $RecieverIdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion){
+    private function reversal($CommandID, $Initiator, $SecurityCredential, $TransactionID, $Amount, $ReceiverParty, $RecieverIdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion)
+    {
 
-        $environment = $this->environment;
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/reversal/v1/request';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/reversal/v1/request';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status. Please set mpesa_env credential as either live or sandbox."]);
-        }
-
-        $token = $this->getAccessToken();
-
+        $url = $this->getUrl('/mpesa/reversal/v1/request');
+        $token = $this->generateToken();
         $curl = curl_init();
 
         curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token));
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json', 'Authorization:Bearer ' . $token));
 
         $curl_post_data = array(
             'CommandID' => $CommandID,
@@ -259,7 +212,7 @@ class Daraja
             'TransactionID' => $TransactionID,
             'Amount' => $Amount,
             'ReceiverParty' => $ReceiverParty,
-            'RecieverIdentifierType' => $RecieverIdentifierType,
+            'ReceiverIdentifierType' => $RecieverIdentifierType,
             'ResultURL' => $ResultURL,
             'QueueTimeOutURL' => $QueueTimeOutURL,
             'Remarks' => $Remarks,
@@ -276,7 +229,7 @@ class Daraja
     }
 
     /**
-     * @param $InitiatorName | 	This is the credential/username used to authenticate the transaction request.
+     * @param $InitiatorName |    This is the credential/username used to authenticate the transaction request.
      * @param $SecurityCredential | Encrypted password for the initiator to autheticate the transaction request
      * @param $CommandID | Unique command for each transaction type e.g. SalaryPayment, BusinessPayment, PromotionPayment
      * @param $Amount | The amount being transacted
@@ -285,35 +238,28 @@ class Daraja
      * @param $Remarks | Comments that are sent along with the transaction.
      * @param $QueueTimeOutURL | The timeout end-point that receives a timeout response.
      * @param $ResultURL | The end-point that receives the response of the transaction
-     * @param $Occasion | 	Optional
+     * @param $Occasion |    Optional
      * @return string
+     * @throws RequestException
      */
-    public function b2c($InitiatorName, $SecurityCredential, $CommandID, $Amount, $PartyA, $PartyB, $Remarks, $QueueTimeOutURL, $ResultURL, $Occasion){
+    public function b2c($InitiatorName, $SecurityCredential, $CommandID, $Amount, $PartyA, $PartyB, $Remarks, $QueueTimeOutURL, $ResultURL, $Occasion): string
+    {
 
-        $environment = $this->environment;
-
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest';
-            $token=self::generateLiveToken();
-        } elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/b2c/v1/paymentrequest';
-            $token=self::generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status. Please set mpesa_env to either live or sandbox via setCredentials()"]);
-        }
+        $url = $this->getUrl('/mpesa/b2c/v1/paymentrequest');
+        $token = $this->generateToken();
 
 
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token));
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json', 'Authorization:Bearer ' . $token));
 
 
         $curl_post_data = array(
             'InitiatorName' => $InitiatorName,
             'SecurityCredential' => $SecurityCredential,
-            'CommandID' => $CommandID ,
+            'CommandID' => $CommandID,
             'Amount' => $Amount,
-            'PartyA' => $PartyA ,
+            'PartyA' => $PartyA,
             'PartyB' => $PartyB,
             'Remarks' => $Remarks,
             'QueueTimeOutURL' => $QueueTimeOutURL,
@@ -332,80 +278,57 @@ class Daraja
         return json_encode($curl_response);
 
     }
+
     /**
-     * Use this function to initiate a C2B transaction
-     * @param $ShortCode | 6 digit M-Pesa Till Number or PayBill Number
-     * @param $CommandID | Unique command for each transaction type.
-     * @param $Amount | The amount been transacted.
-     * @param $Msisdn | MSISDN (phone number) sending the transaction, start with country code without the plus(+) sign.
-     * @param $BillRefNumber | 	Bill Reference Number (Optional).
-     * @return mixed|string
+     * Use this function to simulate a C2B transaction
+     * @param string $ShortCode | 6 digit M-Pesa Till Number or PayBill Number
+     * @param int $Amount | The amount been transacted.
+     * @param string $Msisdn | MSISDN (phone number) sending the transaction, start with country code without the plus(+) sign.
+     * @param string $BillRefNumber |    Bill Reference Number (Optional).
+     * @param bool $isBuyGoods
+     * @param string|null $darajaVersion
+     * @return Collection
+     * @throws RequestException
      */
-    public function c2b($ShortCode, $CommandID, $Amount, $Msisdn, $BillRefNumber ){
-        $environment = $this->environment;
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/c2b/v1/simulate';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/c2b/v1/simulate';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status. Please set mpesa_env to either sandbox or live"]);
-        }
-
+    public function c2b(string $ShortCode, int $Amount, string $Msisdn, string $BillRefNumber, bool $isBuyGoods = false, ?string $darajaVersion = 'v2'): Collection
+    {
+        abort_unless($this->isSandbox(), 403, "This functionality can only be used in sandbox mode.");
+        $CommandID = $isBuyGoods ? "CustomerBuyGoodsOnline" : "CustomerPayBillOnline";
         $token = $this->getAccessToken();
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token));
-
-        $curl_post_data = array(
+        $payload = array(
             'ShortCode' => $ShortCode,
             'CommandID' => $CommandID,
             'Amount' => $Amount,
             'Msisdn' => $Msisdn,
             'BillRefNumber' => $BillRefNumber
         );
-
-        $data_string = json_encode($curl_post_data);
-
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_POST, true);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        $curl_response = curl_exec($curl);
-        return $curl_response;
+        $url =  strtolower($darajaVersion) ? $this->getUrl(self::C2B_V1_SIMULATE_URL) : $this->getUrl(self::C2B_V2_SIMULATE_URL);
+        return Http::withToken($token)->withoutVerifying()->acceptJson()->post($url, $payload)->throw()->collect();
     }
 
 
     /**
      * Use this to initiate a balance inquiry request
      * @param $CommandID | A unique command passed to the M-Pesa system.
-     * @param $Initiator | 	This is the credential/username used to authenticate the transaction request.
+     * @param $Initiator |    This is the credential/username used to authenticate the transaction request.
      * @param $SecurityCredential | Encrypted password for the initiator to autheticate the transaction request
      * @param $PartyA | Type of organization receiving the transaction
      * @param $IdentifierType |Type of organization receiving the transaction
      * @param $Remarks | Comments that are sent along with the transaction.
      * @param $QueueTimeOutURL | The path that stores information of time out transaction
-     * @param $ResultURL | 	The path that stores information of transaction
-     * @return mixed|string
+     * @param $ResultURL |    The path that stores information of transaction
+     * @return string
+     * @throws RequestException
      */
-    public function accountBalance($CommandID, $Initiator, $SecurityCredential, $PartyA, $IdentifierType, $Remarks, $QueueTimeOutURL, $ResultURL){
+    public function accountBalance($CommandID, $Initiator, $SecurityCredential, $PartyA, $IdentifierType, $Remarks, $QueueTimeOutURL, $ResultURL): string
+    {
 
-        $environment = $this->environment;
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/accountbalance/v1/query';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/accountbalance/v1/query';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application environment"]);
-        }
+        $url = $this->getUrl('/mpesa/accountbalance/v1/query');
+        $token = $this->generateToken();
 
-        $token = $this->getAccessToken();
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token)); //setting custom header
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json', 'Authorization:Bearer ' . $token)); //setting custom header
 
 
         $curl_post_data = array(
@@ -425,42 +348,32 @@ class Daraja
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
         curl_setopt($curl, CURLOPT_HEADER, false);
-        $curl_response = curl_exec($curl);
-        return $curl_response;
+        return curl_exec($curl);
     }
 
     /**
      * Use this function to make a transaction status request
      * @param $Initiator | The name of Initiator to initiating the request.
-     * @param $SecurityCredential | 	Encrypted password for the initiator to autheticate the transaction request.
+     * @param $SecurityCredential |    Encrypted password for the initiator to autheticate the transaction request.
      * @param $CommandID | Unique command for each transaction type, possible values are: TransactionStatusQuery.
      * @param $TransactionID | Organization Receiving the funds.
      * @param $PartyA | Organization/MSISDN sending the transaction
      * @param $IdentifierType | Type of organization receiving the transaction
      * @param $ResultURL | The path that stores information of transaction
      * @param $QueueTimeOutURL | The path that stores information of time out transaction
-     * @param $Remarks | 	Comments that are sent along with the transaction
-     * @param $Occasion | 	Optional Parameter
+     * @param $Remarks |    Comments that are sent along with the transaction
+     * @param $Occasion |    Optional Parameter
      * @return mixed|string
+     * @throws RequestException
      */
-    private function transactionStatus($Initiator, $SecurityCredential, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion){
+    private function transactionStatus($Initiator, $SecurityCredential, $CommandID, $TransactionID, $PartyA, $IdentifierType, $ResultURL, $QueueTimeOutURL, $Remarks, $Occasion): mixed
+    {
 
-        $environment = $this->environment;
-
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/transactionstatus/v1/query';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/transactionstatus/v1/query';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status"]);
-        }
-
-        $token = $this->getAccessToken();
+        $url = $this->getUrl('/mpesa/transactionstatus/v1/query');
+        $token= $this->generateToken();
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token)); //setting custom header
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json', 'Authorization:Bearer ' . $token)); //setting custom header
 
 
         $curl_post_data = array(
@@ -503,28 +416,17 @@ class Daraja
      * @param $commandID | Unique command for each transaction type, possible values are: BusinessPayBill, MerchantToMerchantTransfer, MerchantTransferFromMerchantToWorking, MerchantServicesMMFAccountTransfer, AgencyFloatAdvance
      * @param $SenderIdentifierType | Type of organization sending the transaction.
      * @param $RecieverIdentifierType | Type of organization receiving the funds being transacted.
-
-     * @return mixed|string
+     * @return string
+     * @throws RequestException
      */
-    public function b2b($Initiator, $SecurityCredential, $Amount, $PartyA, $PartyB, $Remarks, $QueueTimeOutURL, $ResultURL, $AccountReference, $commandID, $SenderIdentifierType, $RecieverIdentifierType){
+    public function b2b($Initiator, $SecurityCredential, $Amount, $PartyA, $PartyB, $Remarks, $QueueTimeOutURL, $ResultURL, $AccountReference, $commandID, $SenderIdentifierType, $RecieverIdentifierType): string
+    {
 
-        $environment = $this->environment;
-
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/b2b/v1/paymentrequest';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/b2b/v1/paymentrequest';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status"]);
-        }
-
-        $token = $this->getAccessToken();
-
+        $url = $this->getUrl('/mpesa/b2b/v1/paymentrequest');
+        $token= $this->generateToken();
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token)); //setting custom header
+        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json', 'Authorization:Bearer ' . $token)); //setting custom header
         $curl_post_data = array(
             'Initiator' => $Initiator,
             'SecurityCredential' => $SecurityCredential,
@@ -550,143 +452,92 @@ class Daraja
 
     /**
      * Use this function to initiate an STKPush Simulation
-     * @param $BusinessShortCode | The organization shortcode used to receive the transaction.
-     * @param $LipaNaMpesaPasskey | The password for encrypting the request. This is generated by base64 encoding BusinessShortcode, Passkey and Timestamp.
-     * @param $TransactionType | The transaction type to be used for this request. Only CustomerPayBillOnline is supported.
-     * @param $Amount | The amount to be transacted.
-     * @param $PartyA | The MSISDN sending the funds.
-     * @param $PartyB | The organization shortcode receiving the funds
-     * @param $PhoneNumber | The MSISDN sending the funds.
-     * @param $CallBackURL | The url to where responses from M-Pesa will be sent to.
-     * @param $AccountReference | Used with M-Pesa PayBills.
-     * @param $TransactionDesc | A description of the transaction.
-     * @param $Remark | Remarks
-     * @return mixed|string
+     * @param string $shortCode
+     * @param string $PhoneNumber | The MSISDN sending the funds.
+     * @param int $Amount | The amount to be transacted.
+     * @param string $shortCode2
+     * @param string $passKey
+     * @param string $CallBackURL | The url to where responses from M-Pesa will be sent to.
+     * @param string $TransactionDesc | A description of the transaction.
+     * @param string|null $AccountReference | Used with M-Pesa PayBills.
+     * @param bool|null $isBuyGoods
+     * @return Collection
+     * @throws RequestException
      */
-    public function STKPushSimulation($BusinessShortCode, $LipaNaMpesaPasskey, $TransactionType, $Amount, $PartyA, $PartyB, $PhoneNumber, $CallBackURL, $AccountReference, $TransactionDesc, $Remark){
+    public function lipaNaMpesa(
+        string  $shortCode,
+        string  $PhoneNumber,
+        int     $Amount,
+        string  $shortCode2,
+        string  $passKey,
+        string  $CallBackURL,
+        string  $TransactionDesc,
+        ?string $AccountReference = null,
+        ?bool   $isBuyGoods = false
+    ): Collection
+    {
 
-        $environment = $this->environment;
-
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status"]);
-        }
-
+        $TransactionType = $isBuyGoods ? "CustomerBuyGoodsOnline" : "CustomerPayBillOnline";
         $token = $this->getAccessToken();
+        $url = $this->getUrl(self::LNM_PROCESS_URL);
 
-        $timestamp= date(    "Ymdhis");
-        $password=base64_encode($BusinessShortCode.$LipaNaMpesaPasskey.$timestamp);
-
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token));
-
-
-        $curl_post_data = array(
-            'BusinessShortCode' => $BusinessShortCode,
+        $timestamp = date("Ymdhis");
+        $password = base64_encode($shortCode . $passKey . $timestamp);
+        $payload = array(
+            'BusinessShortCode' => $shortCode,
             'Password' => $password,
             'Timestamp' => $timestamp,
             'TransactionType' => $TransactionType,
-            'Amount' => $Amount,
-            'PartyA' => $PartyA,
-            'PartyB' => $PartyB,
+            'Amount' => "$Amount",
+            'PartyA' => $PhoneNumber,
+            'PartyB' => $shortCode2,
             'PhoneNumber' => $PhoneNumber,
             'CallBackURL' => $CallBackURL,
             'AccountReference' => $AccountReference,
             'TransactionDesc' => $TransactionDesc
         );
-
-        $data_string = json_encode($curl_post_data);
-
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_POST, true);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
-        curl_setopt($curl, CURLOPT_HEADER, false);
-        $curl_response=curl_exec($curl);
-        return $curl_response;
-
+        Log::debug(collect($payload));
+        return Http::withToken($token)->acceptJson()->post($url, $payload)->throw()->collect();
     }
 
 
     /**
      * Use this function to initiate an STKPush Status Query request.
      * @param $checkoutRequestID | Checkout RequestID
-     * @param $businessShortCode | Business Short Code
-     * @param $password | Password
+     * @param $shortCode
+     * @param $passKey
      * @param $timestamp | Timestamp
-     * @return mixed|string
+     * @return Collection
+     * @throws RequestException
      */
-    public function STKPushQuery($checkoutRequestID, $businessShortCode, $password, $timestamp){
-
-        $environment =$this->environment;
-
-        if( $environment =="live"){
-            $url = 'https://api.safaricom.co.ke/mpesa/stkpushquery/v1/query';
-            $this->generateLiveToken();
-        }elseif ($environment=="sandbox"){
-            $url = 'https://sandbox.safaricom.co.ke/mpesa/stkpushquery/v1/query';
-            $this->generateSandBoxToken();
-        }else{
-            return json_encode(["Message"=>"invalid application status"]);
-        }
+    public function lipaNaMpesaQuery($checkoutRequestID, $shortCode, $passKey, $timestamp): Collection
+    {
+        $password = base64_encode($shortCode . $passKey . $timestamp);
+        $url = $this->getUrl(self::LNM_QUERY_URL);
         $token = $this->getAccessToken();
-
-        $curl = curl_init();
-        curl_setopt($curl, CURLOPT_URL, $url);
-        curl_setopt($curl, CURLOPT_HTTPHEADER, array('Content-Type:application/json','Authorization:Bearer '.$token));
-
-        $curl_post_data = array(
-            'BusinessShortCode' => $businessShortCode,
+        $payload = array(
+            'BusinessShortCode' => $shortCode,
             'Password' => $password,
             'Timestamp' => $timestamp,
             'CheckoutRequestID' => $checkoutRequestID
         );
-
-        $data_string = json_encode($curl_post_data);
-
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_POST, true);
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $data_string);
-        curl_setopt($curl, CURLOPT_HEADER, false);
-
-        $curl_response = curl_exec($curl);
-
-        return $curl_response;
+        return Http::withToken($token)->withoutVerifying()->acceptJson()->post($url, $payload)->throw()->collect();
     }
 
-    /**
-     *Use this function to confirm all transactions in callback routes
-     */
-    public function finishTransaction($status = true)
+    #[ArrayShape(["ResultCode" => "int", "ResultDesc" => "string"])]
+    public function validationAcceptResponse(): array
     {
-        if ($status === true) {
-            $resultArray=[
-                "ResultDesc"=>"Confirmation Service request accepted successfully",
-                "ResultCode"=>"0"
-            ];
-        } else {
-            $resultArray=[
-                "ResultDesc"=>"Confirmation Service not accepted",
-                "ResultCode"=>"1"
-            ];
-        }
-
-        header('Content-Type: application/json');
-        echo json_encode($resultArray);
+        return [
+            "ResultCode" => 0,
+            "ResultDesc" => "Accepted"
+        ];
     }
-
-
-    /**
-     *Use this function to get callback data posted in callback routes
-     */
-    public function getDataFromCallback(){
-        $callbackJSONData=file_get_contents('php://input');
-        return $callbackJSONData;
+    #[ArrayShape(["ResultCode" => "mixed|string", "ResultDesc" => "string"])]
+    public function validationRejectResponse(string $errorCode = self::ERROR_OTHER): array
+    {
+        return [
+            "ResultCode" => $errorCode,
+            "ResultDesc" => "Rejected"
+        ];
     }
-
 }
